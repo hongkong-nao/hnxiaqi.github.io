@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>会闹下棋</title>
+<style>
+  *{box-sizing:border-box;}
+  body{background:#1a1a1a;color:#eee;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+    display:flex;flex-direction:column;align-items:center;padding:16px 10px;margin:0;min-height:100vh;}
+  h2{margin:0 0 10px;font-weight:600;letter-spacing:1px;font-size:20px;}
+  #gameBar{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;justify-content:center;}
+  #gameBar button{padding:8px 18px;cursor:pointer;background:#2a2a2a;color:#bbb;
+    border:1px solid #444;border-radius:6px;font-size:14px;transition:background .15s,color .15s;}
+  #gameBar button:hover{background:#3a3a3a;}
+  #gameBar button.active{background:#3a5a8a;color:#fff;border-color:#5a7aaa;}
+  #trash{min-height:42px;max-width:560px;text-align:center;color:#f0c040;font-size:14px;line-height:1.5;
+    margin-bottom:8px;padding:0 8px;transition:opacity .2s;}
+  #boardWrap{position:relative;background:#d4a056;padding:8px;border-radius:8px;
+    box-shadow:0 6px 24px rgba(0,0,0,.5);transition:box-shadow .2s;}
+  #boardWrap.shake{animation:shake .35s;}
+  @keyframes shake{0%,100%{transform:translate(0,0)}20%{transform:translate(-5px,2px)}40%{transform:translate(5px,-2px)}60%{transform:translate(-3px,-3px)}80%{transform:translate(3px,3px)}}
+  #board{display:grid;position:relative;z-index:1;}
+  #grid{position:absolute;inset:8px;pointer-events:none;opacity:.35;display:none;}
+  .cell{display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative;z-index:1;border-radius:50%;}
+  .cell:hover:empty{background:rgba(255,255,255,.18);}
+  /* 五子棋/围棋 */
+  .cell.gomoku{width:34px;height:34px;}
+  .black::after,.white::after{content:'';width:76%;height:76%;border-radius:50%;display:block;animation:drop .18s ease-out;}
+  .black::after{background:radial-gradient(circle at 35% 30%,#555,#000 70%);}
+  .white::after{background:radial-gradient(circle at 35% 30%,#fff,#cfcfcf 70%);}
+  @keyframes drop{from{transform:scale(1.6);opacity:.2;}to{transform:scale(1);opacity:1;}}
+  .cell.pop::before{content:'';position:absolute;width:100%;height:100%;border-radius:50%;
+    border:2px solid #e04040;animation:pop .4s ease-out forwards;pointer-events:none;}
+  @keyframes pop{from{transform:scale(.6);opacity:1;}to{transform:scale(1.7);opacity:0;}}
+  .cell.win::after{box-shadow:0 0 0 3px #f0c040,0 0 14px #f0c040;animation:winpulse .6s infinite alternate;}
+  @keyframes winpulse{from{box-shadow:0 0 0 3px #f0c040,0 0 8px #f0c040;}to{box-shadow:0 0 0 4px #fff36b,0 0 20px #f0c040;}}
+  /* 国际象棋 */
+  .cell.chess{width:46px;height:46px;border-radius:0;font-size:32px;line-height:1;}
+  .cell.chess.sel{outline:3px solid #e04040;outline-offset:-3px;}
+  /* 中国象棋 */
+  .cell.xq{width:44px;height:44px;border-radius:0;}
+  .xq-piece{width:88%;height:88%;border-radius:50%;display:flex;align-items:center;justify-content:center;
+    font-weight:700;font-size:20px;background:#f5deb3;border:2px solid #8b5a2b;
+    box-shadow:0 1px 3px rgba(0,0,0,.4);animation:drop .18s ease-out;}
+  .xq-piece.red{color:#c02020;}
+  .xq-piece.blk{color:#111;}
+  .cell.xq.sel .xq-piece{outline:3px solid #e04040;outline-offset:1px;}
+  #status{margin-top:12px;font-size:15px;color:#ccc;min-height:22px;text-align:center;}
+  .controls{display:flex;gap:12px;align-items:center;margin-top:12px;flex-wrap:wrap;justify-content:center;}
+  .controls label{font-size:13px;color:#aaa;display:flex;align-items:center;gap:6px;}
+  select,button{background:#2a2a2a;color:#eee;border:1px solid #444;border-radius:6px;padding:6px 12px;font-size:13px;cursor:pointer;}
+  button:hover,select:hover{background:#3a3a3a;}
+  @media (max-width:560px){
+    .cell.gomoku{width:22px;height:22px;}
+    .cell.chess{width:38px;height:38px;font-size:26px;}
+    .cell.xq{width:36px;height:36px;}
+    .xq-piece{font-size:16px;}
+  }
+</style>
+</head>
+<body>
+<h2>会闹下棋</h2>
+
+<div id="gameBar">
+  <button class="active" data-game="gomoku">五子棋</button>
+  <button data-game="chess">国际象棋</button>
+  <button data-game="xiangqi">中国象棋</button>
+  <button data-game="go">围棋</button>
+</div>
+
+<div id="trash"></div>
+<div id="boardWrap"><div id="grid"></div><div id="board"></div></div>
+<div id="status"></div>
+
+<div class="controls">
+  <label>闹腾程度
+    <select id="noiseSel">
+      <option value="0">安静</option>
+      <option value="1" selected>一般</option>
+      <option value="2">很闹</option>
+    </select>
+  </label>
+  <button onclick="startGame()">重开</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+<script>
+/* ===== 配置 ===== */
+const API_KEY = 'd2d000fe72d24f69b03c78803992755c.rzXWaOUwBncUBXOk';
+const API_URL = 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
+const API_MODEL = 'glm-4-flash';
+
+const boardEl = document.getElementById('board');
+const gridEl = document.getElementById('grid');
+const wrapEl = document.getElementById('boardWrap');
+const statusEl = document.getElementById('status');
+const trashEl = document.getElementById('trash');
+const gameBar = document.getElementById('gameBar');
+const noiseSel = document.getElementById('noiseSel');
+let noise = 1;
+noiseSel.onchange = () => { noise = +noiseSel.value; };
+
+let currentGame = 'gomoku';
+gameBar.addEventListener('click', e => {
+  const btn = e.target.closest('button[data-game]');
+  if(!btn) return;
+  currentGame = btn.dataset.game;
+  [...gameBar.children].forEach(b => b.classList.toggle('active', b === btn));
+  startGame();
+});
+
+/* ===== 音效 ===== */
+let actx = null;
+function audio(){ if(!actx) actx = new (window.AudioContext||window.webkitAudioContext)(); return actx; }
+function tone(freq, dur, type='sine', vol=0.15, slideTo=null){
+  if(noise===0) return;
+  try{
+    const ctx = audio();
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = type; o.frequency.value = freq;
+    if(slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, ctx.currentTime + dur);
+    g.gain.setValueAtTime(vol, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
+    o.connect(g); g.connect(ctx.destination);
+    o.start(); o.stop(ctx.currentTime + dur);
+  }catch(e){}
+}
+const sndPlace = p => tone(p===1?520:420, 0.08, 'triangle', 0.18);
+const sndBlock = () => { tone(300,0.12,'square',0.12,180); setTimeout(()=>tone(240,0.12,'square',0.12,150),70); };
+const sndWin = () => [523,659,784,1046].forEach((f,i)=>setTimeout(()=>tone(f,0.18,'triangle',0.16),i*110));
+const sndLose = () => [400,330,260,200].forEach((f,i)=>setTimeout(()=>tone(f,0.22,'sawtooth',0.12),i*130));
+const sndClick = () => tone(700,0.04,'square',0.08);
+function shake(){ if(noise===0)return; wrapEl.classList.remove('shake'); void wrapEl.offsetWidth; wrapEl.classList.add('shake'); }
+
+/* ===== 台词 ===== */
+const TRASH = {
+  opening:['你先走？那我让你三招。','棋盘挺大，够你输得体面点。','别紧张，我下得很温柔——才怪。','开局了，我已经看到结局。'],
+  midgame:['这一步有点意思，也就一点。','你在思考，我在计算。','继续，我喜欢看人类挣扎。','别急，慢慢想，反正你迟早要输。'],
+  ai_won:['赢了，意料之中。','承让承让——其实不让你也一样。','这局教你一个道理：别跟机器较劲。','胜负已分，再来一局？'],
+  ai_lost:['……这局不算，我走神了。','哼，让你赢一局，免得你失去兴趣。','运气不错。下一局可没这么好说话。','我记住了，这仇下次算。']
+};
+const pick = a => a[Math.floor(Math.random()*a.length)];
+let speakSeq = 0;
+function speak(key, gameName){
+  const seq = ++speakSeq;
+  trashEl.style.opacity = 1;
+  trashEl.textContent = pick(TRASH[key] || TRASH.midgame);
+  const prompts = {
+    opening:`${gameName}刚开局，你是对手，用不超过25字的中文挑衅对方。不要提到AI、模型、程序等词。`,
+    midgame:`${gameName}中盘，你是对手，用不超过25字的中文嘲讽或点评。不要提到AI等词。`,
+    ai_won:`你在${gameName}中赢了，用不超过25字的中文炫耀。不要提到AI等词。`,
+    ai_lost:`你在${gameName}中输了，用不超过25字的中文嘴硬。不要提到AI等词。`
+  };
+  fetch(API_URL,{
+    method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+API_KEY},
+    body:JSON.stringify({model:API_MODEL,messages:[{role:'user',content:prompts[key]||prompts.midgame}],temperature:0.9,max_tokens:80})
+  }).then(r=>r.ok?r.json():Promise.reject()).then(j=>{
+    if(seq !== speakSeq) return;
+    const t = j.choices?.[0]?.message?.content?.trim();
+    if(t){ trashEl.style.opacity = 0; setTimeout(()=>{ if(seq===speakSeq){ trashEl.textContent = t; trashEl.style.opacity = 1; } }, 180); }
+  }).catch(()=>{});
+}
+
+/* ===== 五子棋 ===== */
+const Gomoku = {
+  name:'五子棋', SIZE:15, board:[], over:false, moveCount:0,
+  init(){
+    this.board = Array.from({length:this.SIZE},()=>Array(this.SIZE).fill(0));
+    this.over = false; this.moveCount = 0;
+    boardEl.style.gridTemplateColumns = `repeat(${this.SIZE},34px)`;
+    boardEl.style.gridTemplateRows = `repeat(${this.SIZE},34px)`;
+    gridEl.style.display = 'block';
+    gridEl.style.backgroundImage = 'linear-gradient(#7a5a2a 1px,transparent 1px),linear-gradient(90deg,#7a5a2a 1px,transparent 1px)';
+    gridEl.style.backgroundSize = '34px 34px';
+    statusEl.textContent = '你先走（黑棋）';
+    this.render(); speak('opening', this.name);
+  },
+  render(winCells){
+    boardEl.innerHTML = '';
+    for(let r=0;r<this.SIZE;r++)for(let c=0;c<this.SIZE;c++){
+      const d = document.createElement('div');
+      d.className = 'cell gomoku';
+      if(this.board[r][c]===1) d.classList.add('black');
+      if(this.board[r][c]===2) d.classList.add('white');
+      if(winCells && winCells.some(([wr,wc])=>wr===r&&wc===c)) d.classList.add('win');
+      d.onclick = ()=>this.humanMove(r,c);
+      boardEl.appendChild(d);
+    }
+  },
+  winLine(r,c,p){
+    const dirs=[[0,1],[1,0],[1,1],[1,-1]];
+    for(const[dr,dc]of dirs){
+      const line=[[r,c]];
+      for(const s of[-1,1]){
+        let nr=r+dr*s,nc=c+dc*s;
+        while(nr>=0&&nr<this.SIZE&&nc>=0&&nc<this.SIZE&&this.board[nr][nc]===p){line.push([nr,nc]);nr+=dr*s;nc+=dc*s;}
+      }
+      if(line.length>=5) return line;
+    }
+    return null;
+  },
+  humanMove(r,c){
+    if(this.over||this.board[r][c]!==0)return;
+    sndClick(); this.board[r][c]=1; this.moveCount++; sndPlace(1);
+    const wl = this.winLine(r,c,1);
+    if(wl){ this.over=true; this.render(wl); statusEl.textContent='你赢了'; sndWin(); speak('ai_lost',this.name); return; }
+    if(this.moveCount>=this.SIZE*this.SIZE){ this.over=true; statusEl.textContent='平局'; this.render(); return; }
+    this.render(); statusEl.textContent='对方思考中…';
+    setTimeout(()=>this.aiMove(),200);
+  },
+  aiMove(){
+    if(this.over)return;
+    for(let r=0;r<this.SIZE;r++)for(let c=0;c<this.SIZE;c++){
+      if(this.board[r][c]!==0)continue;
+      this.board[r][c]=2;
+      const wl=this.winLine(r,c,2);
+      if(wl){ this.moveCount++; sndPlace(2); this.render(wl); this.over=true; statusEl.textContent='对方赢了'; sndLose(); speak('ai_won',this.name); return; }
+      this.board[r][c]=0;
+    }
+    for(let r=0;r<this.SIZE;r++)for(let c=0;c<this.SIZE;c++){
+      if(this.board[r][c]!==0)continue;
+      this.board[r][c]=1;
+      if(this.winLine(r,c,1)){ this.board[r][c]=2; this.moveCount++; sndPlace(2); sndBlock(); shake(); this.afterAI(); return; }
+      this.board[r][c]=0;
+    }
+    const cands=[];
+    for(let r=0;r<this.SIZE;r++)for(let c=0;c<this.SIZE;c++){
+      if(this.board[r][c]!==0)continue;
+      let w=0;
+      for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){
+        if(!dr&&!dc)continue;
+        const nr=r+dr,nc=c+dc;
+        if(nr>=0&&nr<this.SIZE&&nc>=0&&nc<this.SIZE&&this.board[nr][nc]!==0)w++;
+      }
+      if(w>0)cands.push([r,c,w]);
+    }
+    if(!cands.length){ this.over=true; statusEl.textContent='平局'; return; }
+    const total=cands.reduce((s,x)=>s+x[2],0);
+    let roll=Math.random()*total, chosen=cands[0];
+    for(const x of cands){ roll-=x[2]; if(roll<=0){ chosen=x; break; } }
+    this.board[chosen[0]][chosen[1]]=2; this.moveCount++; sndPlace(2); this.afterAI();
+  },
+  afterAI(){ this.render(); statusEl.textContent='你的回合（黑棋）'; if(noise===2) shake(); speak(this.moveCount<8?'opening':'midgame',this.name); }
+};
+
+/* ===== 国际象棋 ===== */
+const ChessGame = {
+  name:'国际象棋', game:null, selected:null,
+  init(){
+    this.game = new Chess(); this.selected = null;
+    boardEl.style.gridTemplateColumns = 'repeat(8,46px)';
+    boardEl.style.gridTemplateRows = 'repeat(8,46px)';
+    gridEl.style.display = 'none';
+    statusEl.textContent = '你先走（白棋）';
+    this.render(); speak('opening', this.name);
+  },
+  pieceChar(p){
+    if(p.color==='w') return {p:'♙',n:'♘',b:'♗',r:'♖',q:'♕',k:'♔'}[p.type];
+    return {p:'♟',n:'♞',b:'♝',r:'♜',q:'♛',k:'♚'}[p.type];
+  },
+  render(){
+    boardEl.innerHTML = '';
+    const b = this.game.board();
+    for(let r=0;r<8;r++)for(let c=0;c<8;c++){
+      const d = document.createElement('div');
+      d.className = 'cell chess';
+      d.style.background = (r+c)%2===0 ? '#f0d9b5' : '#b58863';
+      const sq = String.fromCharCode(97+c)+(8-r);
+      if(this.selected===sq) d.classList.add('sel');
+      const piece = b[r][c];
+      if(piece){
+        const sp = document.createElement('span');
+        sp.textContent = this.pieceChar(piece);
+        sp.style.color = piece.color==='w' ? '#fff' : '#111';
+        sp.style.textShadow = piece.color==='w' ? '0 0 2px #000,0 0 1px #000' : '0 0 1px #fff';
+        d.appendChild(sp);
+      }
+      d.onclick = ()=>this.click(sq);
+      boardEl.appendChild(d);
+    }
+  },
+  click(sq){
+    if(this.game.game_over()) return;
+    if(this.selected){
+      const mv = this.game.move({from:this.selected,to:sq,promotion:'q'});
+      if(mv){
+        this.selected = null; sndPlace(1); this.render();
+        if(this.checkEnd()) return;
+        statusEl.textContent = '对方思考中…';
+        setTimeout(()=>this.aiMove(),200);
+        return;
+      }
+    }
+    const p = this.game.get(sq);
+    if(p && p.color==='w'){ this.selected = sq; sndClick(); this.render(); }
+    else { this.selected = null; this.render(); }
+  },
+  aiMove(){
+    if(this.game.game_over()) return;
+    const moves = this.game.moves({verbose:true});
+    if(!moves.length){ this.checkEnd(); return; }
+    const val = {p:1,n:3,b:3,r:5,q:9,k:0};
+    let best=null, bestScore=-1;
+    for(const m of moves){
+      let sc = Math.random()*0.5;
+      if(m.captured) sc += val[m.captured]*10;
+      if(m.san.includes('#')) sc += 1000;
+      if(m.san.includes('+')) sc += 5;
+      if(sc>bestScore){ bestScore=sc; best=m; }
+    }
+    this.game.move(best); sndPlace(2); this.render();
+    if(best.captured){ sndBlock(); shake(); }
+    if(this.checkEnd()) return;
+    statusEl.textContent = '你的回合（白棋）';
+    if(noise===2) shake();
+    speak('midgame', this.name);
+  },
+  checkEnd(){
+    if(!this.game.game_over()) return false;
+    if(this.game.in_checkmate()){
+      if(this.game.turn()==='w'){ statusEl.textContent='你输了'; sndLose(); speak('ai_won',this.name); }
+      else { statusEl.textContent='你赢了'; sndWin(); speak('ai_lost',this.name); }
+    } else { statusEl.textContent='平局'; }
+    return true;
+  }
+};
+
+/* ===== 中国象棋 ===== */
+const Xiangqi = {
+  name:'中国象棋', board:[], selected:null, over:false, turn:'r',
+  init(){
+    const rows = [
+      ['r','n','b','a','k','a','b','n','r'],
+      ['','','','','','','','',''],
+      ['','c','','','','','c','',''],
+      ['p','','p','','p','','p','','p'],
+      ['','','','','','','','',''],
+      ['','','','','','','','',''],
+      ['P','','P','','P','','P','','P'],
+      ['','C','','','','','C','',''],
+      ['','','','','','','','',''],
+      ['R','N','B','A','K','A','B','N','R']
+    ];
+    this.board = rows.map(r=>r.slice());
+    this.selected = null; this.over = false; this.turn = 'r';
+    boardEl.style.gridTemplateColumns = 'repeat(9,44px)';
+    boardEl.style.gridTemplateRows = 'repeat(10,44px)';
+    gridEl.style.display = 'none';
+    statusEl.textContent = '你先走（红方）';
+    this.render(); speak('opening', this.name);
+  },
+  isRed(p){ return p && p===p.toUpperCase(); },
+  isBlack(p){ return p && p===p.toLowerCase(); },
+  color(p){ return this.isRed(p)?'r':(this.isBlack(p)?'b':null); },
+  inB(r,c){ return r>=0&&r<10&&c>=0&&c<9; },
+  render(){
+    boardEl.innerHTML = '';
+    for(let r=0;r<10;r++)for(let c=0;c<9;c++){
+      const d = document.createElement('div');
+      d.className = 'cell xq';
+      d.style.background = 'transparent';
+      if((r+c)%2===0) d.style.background = 'rgba(0,0,0,0.04)';
+      const piece = this.board[r][c];
+      if(piece){
+        const sp = document.createElement('div');
+        sp.className = 'xq-piece ' + (this.isRed(piece)?'red':'blk');
+        sp.textContent = this.charOf(piece);
+        d.appendChild(sp);
+      }
+      if(this.selected && this.selected[0]===r && this.selected[1]===c) d.classList.add('sel');
+      d.onclick = ()=>this.click(r,c);
+      boardEl.appendChild(d);
+    }
+  },
+  charOf(p){
+    const red = {R:'车',N:'马',B:'相',A:'仕',K:'帅',C:'炮',P:'兵'};
+    const blk = {r:'车',n:'马',b:'象',a:'士',k:'将',c:'炮',p:'卒'};
+    return this.isRed(p) ? red[p] : blk[p];
+  },
+  click(r,c){
+    if(this.over || this.turn!=='r') return;
+    const p = this.board[r][c];
+    if(this.selected){
+      const [sr,sc] = this.selected;
+      const fromP = this.board[sr][sc];
+      if(this.legal(fromP, sr, sc, r, c)){ this.move(sr,sc,r,c); return; }
+      if(p && this.isRed(p)){ this.selected = [r,c]; sndClick(); this.render(); return; }
+      this.selected = null; this.render(); return;
+    }
+    if(p && this.isRed(p)){ this.selected = [r,c]; sndClick(); this.render(); }
+  },
+  legal(p, sr, sc, tr, tc){
+    if(!p) return false;
+    if(!this.inB(tr,tc)) return false;
+    const target = this.board[tr][tc];
+    if(target && this.color(target)===this.color(p)) return false;
+    const dr = tr-sr, dc = tc-sc;
+    const ar = Math.abs(dr), ac = Math.abs(dc);
+    const t = p.toLowerCase();
+    const isR = this.isRed(p);
+    if(t==='k'){
+      if(isR){ if(tr<7||tr>9||tc<3||tc>5) return false; } else { if(tr<0||tr>2||tc<3||tc>5) return false; }
+      return (ar+ac)===1;
+    }
+    if(t==='a'){
+      if(isR){ if(tr<7||tr>9||tc<3||tc>5) return false; } else { if(tr<0||tr>2||tc<3||tc>5) return false; }
+      return ar===1 && ac===1;
+    }
+    if(t==='b'){
+      if(ar!==2||ac!==2) return false;
+      const eyeR = sr+dr/2, eyeC = sc+dc/2;
+      if(this.board[eyeR][eyeC]) return false;
+      if(isR && tr<5) return false;
+      if(!isR && tr>4) return false;
+      return true;
+    }
+    if(t==='n'){
+      if(!((ar===2&&ac===1)||(ar===1&&ac===2))) return false;
+      let legR = sr, legC = sc;
+      if(ar===2) legR = sr + dr/2;
+      else legC = sc + dc/2;
+      return !this.board[legR][legC];
+    }
+    if(t==='r'){
+      if(dr!==0 && dc!==0) return false;
+      return this.clearPath(sr,sc,tr,tc);
+    }
+    if(t==='c'){
+      if(dr!==0 && dc!==0) return false;
+      const between = this.countBetween(sr,sc,tr,tc);
+      if(target) return between===1;
+      return between===0;
+    }
+    if(t==='p'){
+      if(isR){
+        if(dr===-1 && dc===0) return true;
+        if(sr<=4 && dr===0 && ac===1) return true;
+        return false;
+      } else {
+        if(dr===1 && dc===0) return true;
+        if(sr>=5 && dr===0 && ac===1) return true;
+        return false;
+      }
+    }
+    return false;
+  },
+  clearPath(sr,sc,tr,tc){
+    if(sr===tr){
+      const step = tc>sc?1:-1;
+      for(let c=sc+step;c!==tc;c+=step) if(this.board[sr][c]) return false;
+      return true;
+    }
+    const step = tr>sr?1:-1;
+    for(let r=sr+step;r!==tr;r+=step) if(this.board[r][sc]) return false;
+    return true;
+  },
+  countBetween(sr,sc,tr,tc){
+    let n=0;
+    if(sr===tr){
+      const step = tc>sc?1:-1;
+      for(let c=sc+step;c!==tc;c+=step) if(this.board[sr][c]) n++;
+    } else {
+      const step = tr>sr?1:-1;
+      for(let r=sr+step;r!==tr;r+=step) if(this.board[r][sc]) n++;
+    }
+    return n;
+  },
+  move(sr,sc,tr,tc){
+    const p = this.board[sr][sc];
+    const cap = this.board[tr][tc];
+    this.board[tr][tc] = p; this.board[sr][sc] = '';
+    this.selected = null;
+    this.turn = 'b';
+    sndPlace(1); if(cap){ sndBlock(); shake(); }
+    this.render();
+    if(this.isKingCaptured('b')){ this.over=true; statusEl.textContent='你赢了'; sndWin(); speak('ai_lost',this.name); return; }
+    statusEl.textContent='对方思考中…';
+    setTimeout(()=>this.aiMove(),200);
+  },
+  isKingCaptured(side){
+    const k = side==='b' ? 'k' : 'K';
+    for(let r=0;r<10;r++)for(let c=0;c<9;c++) if(this.board[r][c]===k) return false;
+    return true;
+  },
+  allMoves(side){
+    const res = [];
+    for(let r=0;r<10;r++)for(let c=0;c<9;c++){
+      const p = this.board[r][c];
+      if(!p) continue;
+      if(this.color(p)!==side) continue;
+      for(let tr=0;tr<10;tr++)for(let tc=0;tc<9;tc++){
+        if(this.legal(p,r,c,tr,tc)) res.push([r,c,tr,tc]);
+      }
+    }
+    return res;
+  },
+  aiMove(){
+    if(this.over) return;
+    const moves = this.allMoves('b');
+    if(!moves.length){ this.over=true; statusEl.textContent='平局'; return; }
+    const val = {k:1000,r:9,n:4,c:5,a:2,b:2,p:1};
+    let best=null, bestScore=-Infinity;
+    for(const m of moves){
+      const [sr,sc,tr,tc] = m;
+      const cap = this.board[tr][tc];
+      let sc2 = Math.random()*0.5;
+      if(cap) sc2 += val[cap.toLowerCase()]*10;
+      if(sc2>bestScore){ bestScore=sc2; best=m; }
+    }
+    const [sr,sc,tr,tc] = best;
+    const p = this.board[sr][sc];
+    const cap = this.board[tr][tc];
+    this.board[tr][tc] = p; this.board[sr][sc] = '';
+    this.turn = 'r';
+    sndPlace(2); if(cap){ sndBlock(); shake(); }
+    this.render();
+    if(this.isKingCaptured('r')){ this.over=true; statusEl.textContent='你输了'; sndLose(); speak('ai_won',this.name); return; }
+    statusEl.textContent='你的回合（红方）';
+    if(noise===2) shake();
+    speak('midgame', this.name);
+  }
+};
+
+/* ===== 围棋（9路简化版） ===== */
+const Go = {
+  name:'围棋', SIZE:9, board:[], over:false, turn:1, captures:{1:0,2:0}, passes:0,
+  init(){
+    this.board = Array.from({length:this.SIZE},()=>Array(this.SIZE).fill(0));
+    this.over = false; this.turn = 1; this.captures = {1:0,2:0}; this.passes = 0;
+    boardEl.style.gridTemplateColumns = `repeat(${this.SIZE},38px)`;
+    boardEl.style.gridTemplateRows = `repeat(${this.SIZE},38px)`;
+    gridEl.style.display = 'block';
+    gridEl.style.backgroundImage = 'linear-gradient(#7a5a2a 1px,transparent 1px),linear-gradient(90deg,#7a5a2a 1px,transparent 1px)';
+    gridEl.style.backgroundSize = '38px 38px';
+    statusEl.textContent = '你先走（黑棋）';
+    this.render(); speak('opening', this.name);
+  },
+  render(){
+    boardEl.innerHTML = '';
+    for(let r=0;r<this.SIZE;r++)for(let c=0;c<this.SIZE;c++){
+      const d = document.createElement('div');
+      d.className = 'cell gomoku';
+      d.style.width = '38px'; d.style.height = '38px';
+      if(this.board[r][c]===1) d.classList.add('black');
+      if(this.board[r][c]===2) d.classList.add('white');
+      d.onclick = ()=>this.humanMove(r,c);
+      boardEl.appendChild(d);
+    }
+  },
+  neighbors(r,c){
+    const res = [];
+    for(const [dr,dc] of [[-1,0],[1,0],[0,-1],[0,1]]){
+      const nr=r+dr, nc=c+dc;
+      if(nr>=0&&nr<this.SIZE&&nc>=0&&nc<this.SIZE) res.push([nr,nc]);
+    }
+    return res;
+  },
+  group(r,c){
+    const color = this.board[r][c];
+    const seen = new Set();
+    const stones = [];
+    const stack = [[r,c]];
+    while(stack.length){
+      const [cr,cc] = stack.pop();
+      const key = cr*this.SIZE+cc;
+      if(seen.has(key)) continue;
+      seen.add(key);
+      if(this.board[cr][cc]!==color) continue;
+      stones.push([cr,cc]);
+      for(const [nr,nc] of this.neighbors(cr,cc)){
+        if(this.board[nr][nc]===color) stack.push([nr,nc]);
+      }
+    }
+    return stones;
+  },
+  liberties(stones){
+    const libs = new Set();
+    for(const [r,c] of stones){
+      for(const [nr,nc] of this.neighbors(r,c)){
+        if(this.board[nr][nc]===0) libs.add(nr*this.SIZE+nc);
+      }
+    }
+    return libs.size;
+  },
+  tryPlay(r,c,color){
+    // 返回 {ok, captured:[], board} 模拟落子
+    if(this.board[r][c]!==0) return {ok:false};
+    const old = this.board[r][c];
+    this.board[r][c] = color;
+    const opp = color===1?2:1;
+    const captured = [];
+    for(const [nr,nc] of this.neighbors(r,c)){
+      if(this.board[nr][nc]===opp){
+        const g = this.group(nr,nc);
+        if(this.liberties(g)===0){
+          for(const [gr,gc] of g){ captured.push([gr,gc]); this.board[gr][gc]=0; }
+        }
+      }
+    }
+    const own = this.group(r,c);
+    if(this.liberties(own)===0 && captured.length===0){
+      // 自杀
+      this.board[r][c] = old;
+      // 恢复被提的子不必要（无提子）
+      return {ok:false};
+    }
+    return {ok:true, captured};
+  },
+  humanMove(r,c){
+    if(this.over || this.turn!==1) return;
+    if(this.board[r][c]!==0) return;
+    const res = this.tryPlay(r,c,1);
+    if(!res.ok){ sndBlock(); shake(); return; }
+    sndClick(); sndPlace(1);
+    if(res.captured.length){ sndBlock(); shake(); }
+    this.turn = 2;
+    this.render();
+    statusEl.textContent = '对方思考中…';
+    setTimeout(()=>this.aiMove(),200);
+  },
+  aiMove(){
+    if(this.over) return;
+    // 简单评估：遍历空点，优先能吃子、其次靠近已有棋子、避免自杀
+    const cands = [];
+    for(let r=0;r<this.SIZE;r++)for(let c=0;c<this.SIZE;c++){
+      if(this.board[r][c]!==0) continue;
+      const res = this.tryPlay(r,c,2);
+      if(!res.ok) continue;
+      let score = Math.random()*0.5;
+      score += res.captured.length * 20;
+      let near = 0;
+      for(const [nr,nc] of this.neighbors(r,c)) if(this.board[nr][nc]!==0) near++;
+      score += near * 1.5;
+      cands.push([r,c,score]);
+    }
+    if(!cands.length){ this.over=true; statusEl.textContent='棋局结束'; return; }
+    cands.sort((a,b)=>b[2]-a[2]);
+    const [r,c] = cands[0];
+    const res = this.tryPlay(r,c,2);
+    sndPlace(2);
+    if(res.captured.length){ sndBlock(); shake(); }
+    this.turn = 1;
+    this.render();
+    statusEl.textContent = '你的回合（黑棋）';
+    if(noise===2) shake();
+    speak('midgame', this.name);
+  }
+};
+
+/* ===== 启动 ===== */
+function startGame(){
+  if(currentGame==='gomoku') Gomoku.init();
+  else if(currentGame==='chess') ChessGame.init();
+  else if(currentGame==='xiangqi') Xiangqi.init();
+  else Go.init();
+}
+startGame();
+</script>
+</body>
+</html>
